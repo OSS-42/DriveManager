@@ -61,12 +61,16 @@ public struct ScanResult: Sendable {
 /// Walks a folder and builds a tree of sizes.
 ///
 /// Sizes are the space allocated on disk, as Finder's "on disk" figure.
-/// Symbolic links are not followed, and a file with several hard links is
-/// counted once. Folders near the root are scanned in parallel.
+/// Symbolic links are not followed. A file with several hard links, and a
+/// set of APFS clones that still share all their data, are counted once. Folders near the root are scanned in parallel.
 public final class Scanner: @unchecked Sendable {
-    private struct HardLinkID: Hashable {
+    /// Data that more than one file can point at: a file with several hard
+    /// links, or a set of APFS clones.
+    private struct SharedDataID: Hashable {
+        enum Kind { case hardLink, clone }
+        let kind: Kind
         let device: Int32
-        let fileID: UInt64
+        let id: UInt64
     }
 
     /// Folders less than this many levels below the root are split across
@@ -76,7 +80,7 @@ public final class Scanner: @unchecked Sendable {
 
     private let options: ScanOptions
     private let lock = NSLock()
-    private var seenHardLinks = Set<HardLinkID>()
+    private var seenSharedData = Set<SharedDataID>()
     private var unreadable: [String] = []
     private var otherDisks: [String] = []
     /// Set before each scan starts and only read while it runs.
@@ -91,7 +95,7 @@ public final class Scanner: @unchecked Sendable {
     public func scan(_ url: URL) async -> ScanResult {
         let start = Date()
         lock.withLock {
-            seenHardLinks.removeAll()
+            seenSharedData.removeAll()
             unreadable.removeAll()
             otherDisks.removeAll()
         }
@@ -180,7 +184,10 @@ public final class Scanner: @unchecked Sendable {
                 continue
             }
             var size = entry.allocatedSize
-            if entry.linkCount > 1 && !firstSighting(of: HardLinkID(device: entry.device, fileID: entry.fileID)) {
+            if entry.linkCount > 1 && !firstSighting(of: SharedDataID(kind: .hardLink, device: entry.device, id: entry.fileID)) {
+                size = 0
+            } else if let cloneID = entry.cloneID,
+                      !firstSighting(of: SharedDataID(kind: .clone, device: entry.device, id: cloneID)) {
                 size = 0
             }
             folder.add(FileNode(name: entry.name, isDirectory: false, size: size, fileCount: 1))
@@ -215,7 +222,7 @@ public final class Scanner: @unchecked Sendable {
         return path
     }
 
-    private func firstSighting(of id: HardLinkID) -> Bool {
-        lock.withLock { seenHardLinks.insert(id).inserted }
+    private func firstSighting(of id: SharedDataID) -> Bool {
+        lock.withLock { seenSharedData.insert(id).inserted }
     }
 }
