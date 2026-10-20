@@ -70,6 +70,36 @@ final class ScannerTests: XCTestCase {
         XCTAssertEqual(result.totalSize, sizes.last)
     }
 
+    func testClonedFileIsCountedOnce() async throws {
+        let original = try write("original.bin", bytes: 500_000)
+        let copy = root.appendingPathComponent("clone.bin")
+        guard clonefile(original.path, copy.path, 0) == 0 else {
+            throw XCTSkip("This disk cannot clone files (not APFS)")
+        }
+
+        let result = await Scanner().scan(root)
+        let sizes = result.root.children.map(\.size).sorted()
+
+        XCTAssertEqual(result.fileCount, 2)
+        XCTAssertEqual(sizes.first, 0)
+        XCTAssertGreaterThanOrEqual(sizes.last ?? 0, 500_000)
+    }
+
+    func testDivergedCloneIsCountedInFull() async throws {
+        let original = try write("original.bin", bytes: 500_000)
+        let copy = root.appendingPathComponent("clone.bin")
+        guard clonefile(original.path, copy.path, 0) == 0 else {
+            throw XCTSkip("This disk cannot clone files (not APFS)")
+        }
+        let handle = try FileHandle(forWritingTo: copy)
+        try handle.write(contentsOf: Data(repeating: 0xCD, count: 4_096))
+        try handle.close()
+
+        let result = await Scanner().scan(root)
+
+        XCTAssertTrue(result.root.children.allSatisfy { $0.size >= 500_000 }, "\(result.root.children.map(\.size))")
+    }
+
     func testSymbolicLinkIsNotFollowed() async throws {
         try write("data/big.bin", bytes: 500_000)
         try files.createSymbolicLink(
