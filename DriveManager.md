@@ -31,6 +31,9 @@ Planned layout: a Swift package with a `DriveCore` library (scanner, index, rule
 
 ## Working in this repo
 
+- `swift run -c release drive-scan ~` scans your home folder; `drive-scan --help` lists the options. Give your terminal Full Disk Access first, or some folders read as empty.
+- `swift test` runs the tests.
+
 - Code is written in a cloud Linux container, which has no Swift toolchain. CI (`.github/workflows/ci.yml`) builds and tests on a macOS runner; treat a green CI run as the build check.
 - Keep `DriveCore` free of UI code so it can be unit-tested with `swift test`.
 - Each cleanup rule gets a unit test against a fake folder tree.
