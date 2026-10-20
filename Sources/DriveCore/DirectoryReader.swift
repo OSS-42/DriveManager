@@ -15,6 +15,12 @@ struct DirectoryEntry {
     let fileID: UInt64
 }
 
+/// A folder's items and the device (volume) the folder is on.
+struct DirectoryListing {
+    let device: Int32
+    let entries: [DirectoryEntry]
+}
+
 /// Reads a folder's items and their sizes with `getattrlistbulk`, which
 /// returns many items per system call instead of one `stat` per item.
 enum DirectoryReader {
@@ -37,10 +43,16 @@ enum DirectoryReader {
     private static let bufferSize = 256 * 1024
 
     /// The folder's items, or nil when it cannot be opened.
-    static func read(_ path: String) -> [DirectoryEntry]? {
+    static func read(_ path: String) -> DirectoryListing? {
         let folder = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard folder >= 0 else { return nil }
         defer { close(folder) }
+
+        // The device of the opened folder itself. For a mount point this is
+        // the mounted disk, while its entry in the parent listing still
+        // reports the parent's disk.
+        var info = stat()
+        guard fstat(folder, &info) == 0 else { return nil }
 
         var request = attrlist()
         request.bitmapcount = 5 // ATTR_BIT_MAP_COUNT
@@ -53,7 +65,7 @@ enum DirectoryReader {
         var entries: [DirectoryEntry] = []
         while true {
             let count = getattrlistbulk(folder, &request, buffer, bufferSize, 0)
-            if count < 0 { return entries.isEmpty ? nil : entries }
+            if count < 0 { return entries.isEmpty ? nil : DirectoryListing(device: info.st_dev, entries: entries) }
             if count == 0 { break }
 
             var record = UnsafeRawPointer(buffer)
@@ -65,7 +77,7 @@ enum DirectoryReader {
                 record += length
             }
         }
-        return entries
+        return DirectoryListing(device: info.st_dev, entries: entries)
     }
 
     /// Reads one record. Its layout: a UInt32 length, the five-word

@@ -138,4 +138,36 @@ final class ScannerTests: XCTestCase {
         XCTAssertFalse(result.scannedWholeVolume)
         XCTAssertNil(result.hiddenSize)
     }
+
+    @discardableResult
+    private func run(_ tool: String, _ arguments: [String]) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    func testDiskMountedInsideTheScanIsSkipped() async throws {
+        try write("local.bin", bytes: 10_000)
+        let image = root.appendingPathComponent("disk.dmg").path
+        let mountPoint = root.appendingPathComponent("mounted")
+        try files.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+
+        let hdiutil = "/usr/bin/hdiutil"
+        guard try run(hdiutil, ["create", "-size", "5m", "-fs", "HFS+", "-volname", "DriveCoreTest", image]) == 0,
+              try run(hdiutil, ["attach", "-nobrowse", "-mountpoint", mountPoint.path, image]) == 0
+        else { throw XCTSkip("hdiutil could not create or mount a disk image here") }
+        defer { _ = try? run(hdiutil, ["detach", "-force", mountPoint.path]) }
+        try Data(repeating: 0xAB, count: 1_000_000).write(to: mountPoint.appendingPathComponent("inside.bin"))
+
+        let result = await Scanner().scan(root)
+
+        XCTAssertNil(result.root.child(named: "mounted"))
+        XCTAssertEqual(result.otherDiskPaths, [mountPoint.path])
+        XCTAssertNotNil(result.root.child(named: "local.bin"))
+    }
 }
