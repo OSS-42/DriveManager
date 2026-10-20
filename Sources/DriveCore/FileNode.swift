@@ -43,6 +43,19 @@ public final class FileNode: @unchecked Sendable {
         children.first { $0.name == name }
     }
 
+    /// The item at `path` inside this tree, if the scan found it. `path` is
+    /// a full path starting with the root's own path.
+    public func descendant(atPath path: String) -> FileNode? {
+        let prefix = name.hasSuffix("/") ? name : name + "/"
+        if path == name { return self }
+        guard path.hasPrefix(prefix) else { return nil }
+        var node: FileNode? = self
+        for part in path.dropFirst(prefix.count).split(separator: "/") {
+            node = node?.child(named: String(part))
+        }
+        return node
+    }
+
     /// The item's full path, built from the scan's root.
     public var path: String {
         var names: [String] = []
