@@ -55,6 +55,19 @@ final class ScanModel {
     private(set) var revision = 0
     private let cleaner = Cleaner()
 
+    /// Junk found by the cleanup rules, largest first.
+    private(set) var suggestions: [Suggestion] = []
+    private(set) var health: HealthScore?
+    private var healthInput: HealthInput?
+    /// Used-space growth per week, measured when the scan finished.
+    private var weeklyGrowth: Int64?
+
+    private static let supportFolder = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("DriveManager")
+    private let rules = SuggestionEngine.rules(withOverridesAt: ScanModel.supportFolder.appendingPathComponent("rules.json"))
+    private let weights = HealthWeights.load(from: ScanModel.supportFolder.appendingPathComponent("settings.json"))
+
     /// How many rings the sunburst draws around its center.
     static let rings = 4
 
@@ -87,6 +100,9 @@ final class ScanModel {
         center = nil
         expanded = []
         lastTrash = nil
+        suggestions = []
+        health = nil
+        healthInput = nil
         Task {
             let result = await Task.detached(priority: .userInitiated) {
                 await Scanner().scan(url)
@@ -94,6 +110,13 @@ final class ScanModel {
             self.result = result
             center = result.root
             expanded = [result.root.id]
+            if result.scannedWholeVolume, let volume = result.volume {
+                let history = ScanHistory(url: Self.supportFolder.appendingPathComponent("scan-history.json"))
+                weeklyGrowth = history.record(used: volume.used)
+            } else {
+                weeklyGrowth = nil
+            }
+            refreshInsights()
             phase = .done
         }
     }
@@ -160,10 +183,42 @@ final class ScanModel {
         selection.removeValue(forKey: node.id)
     }
 
-    /// Moves the selected items to the Trash and takes them out of the tree.
-    /// Protected items stay where they are and are listed as skipped.
+    /// Adds every item of a suggestion to the selection, or takes them all
+    /// out when they are all in already.
+    func toggleSelection(of suggestion: Suggestion) {
+        if suggestion.items.allSatisfy(isSelected) {
+            for item in suggestion.items {
+                selection.removeValue(forKey: item.id)
+            }
+        } else {
+            for item in suggestion.items {
+                selection[item.id] = item
+            }
+            focus = suggestion.items.first
+        }
+    }
+
+    /// Score points gained by removing a suggestion's items.
+    func points(for suggestion: Suggestion) -> Int {
+        guard let healthInput else { return 0 }
+        return HealthScore.points(for: suggestion, in: healthInput, weights: weights)
+    }
+
+    var safeItems: [FileNode] {
+        suggestions.filter { $0.rule.level == .safe }.flatMap(\.items)
+    }
+
     func moveSelectionToTrash() {
-        let items = selectedItems
+        moveToTrash(selectedItems)
+    }
+
+    func cleanAllSafe() {
+        moveToTrash(safeItems)
+    }
+
+    /// Moves items to the Trash and takes them out of the tree. Protected
+    /// items stay where they are and are listed as skipped.
+    private func moveToTrash(_ items: [FileNode]) {
         let byPath = Dictionary(items.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let outcome = cleaner.moveToTrash(items.map { (path: $0.path, size: $0.size) })
         var moved: [TrashBatch.Item] = []
@@ -178,9 +233,13 @@ final class ScanModel {
             node.detach()
             moved.append(TrashBatch.Item(record: record, node: node, parent: parent))
         }
-        selection = selection.filter { _, node in outcome.skipped.contains { $0.path == node.path } }
+        // Drop what left the tree, including items inside a moved folder.
+        if let root = result?.root {
+            selection = selection.filter { _, node in node === root || ancestors(of: node).last === root }
+        }
         lastTrash = TrashBatch(items: moved, skipped: outcome.skipped)
         revision += 1
+        refreshInsights()
     }
 
     /// Puts the last batch back from the Trash and into the tree.
@@ -192,6 +251,31 @@ final class ScanModel {
         }
         lastTrash = nil
         revision += 1
+        refreshInsights()
+    }
+
+    /// Runs the cleanup rules over the tree and scores the disk.
+    private func refreshInsights() {
+        guard let result else { return }
+        suggestions = SuggestionEngine.suggestions(in: result.root, rules: rules)
+        guard let volume = result.volume else {
+            health = nil
+            healthInput = nil
+            return
+        }
+        let home = NSHomeDirectory()
+        let housekeeping = [home + "/.Trash", home + "/Downloads"]
+            .compactMap { result.root.descendant(atPath: $0)?.size }
+            .reduce(0, +)
+        let input = HealthInput(
+            capacity: volume.totalCapacity,
+            available: volume.availableForImportantUsage,
+            suggestions: suggestions,
+            housekeeping: housekeeping,
+            weeklyGrowth: weeklyGrowth
+        )
+        healthInput = input
+        health = HealthScore(input, weights: weights)
     }
 
     func dismissLastTrash() {

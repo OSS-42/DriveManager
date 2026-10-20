@@ -5,6 +5,12 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @State private var model = ScanModel()
     @State private var isChoosingFolder = false
+    @State private var screen = Screen.overview
+
+    enum Screen: String, CaseIterable {
+        case overview = "Overview"
+        case explore = "Explore"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,10 +30,16 @@ struct ContentView: View {
                         Divider()
                     }
                     HSplitView {
-                        TreeView(model: model)
-                            .frame(minWidth: 340, idealWidth: 460)
-                        SunburstView(model: model)
-                            .frame(minWidth: 360)
+                        switch screen {
+                        case .overview:
+                            OverviewView(model: model)
+                                .frame(minWidth: 560)
+                        case .explore:
+                            TreeView(model: model)
+                                .frame(minWidth: 340, idealWidth: 460)
+                            SunburstView(model: model)
+                                .frame(minWidth: 360)
+                        }
                         if !model.selection.isEmpty {
                             SelectedTray(model: model)
                                 .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
@@ -41,6 +53,15 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Screen", selection: $screen) {
+                    ForEach(Screen.allCases, id: \.self) { screen in
+                        Text(screen.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(model.result == nil)
+            }
             ToolbarItemGroup {
                 Button(action: scanDisk) {
                     Label("Scan Disk", systemImage: "internaldrive")
@@ -82,6 +103,7 @@ struct ContentView: View {
     }
 
     private func scanDisk() {
+        screen = .overview
         model.scan(URL(fileURLWithPath: "/"))
     }
 }
