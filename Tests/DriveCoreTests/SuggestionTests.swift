@@ -44,6 +44,12 @@ final class SuggestionTests: XCTestCase {
         XCTAssertEqual(Set(SuggestionEngine.defaultRules.map(\.id)).count, SuggestionEngine.defaultRules.count)
     }
 
+    func testEveryBuiltInRuleExplainsItself() {
+        for rule in SuggestionEngine.defaultRules {
+            XCTAssertNotNil(rule.explain, rule.id)
+        }
+    }
+
     func testWildcardMatchesEachChild() throws {
         let root = tree([
             "Users/someone/Library/Caches/com.a/data": 300,
