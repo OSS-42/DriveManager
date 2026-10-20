@@ -14,6 +14,7 @@ struct SunburstView: View {
     private static let rings = ScanModel.rings
 
     var body: some View {
+        let _ = model.revision
         if let center = model.center {
             let segments = SunburstLayout.segments(for: center, maxDepth: Self.rings)
             GeometryReader { proxy in

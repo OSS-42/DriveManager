@@ -100,6 +100,28 @@ final class ScannerTests: XCTestCase {
         XCTAssertTrue(result.root.children.allSatisfy { $0.size >= 500_000 }, "\(result.root.children.map(\.size))")
     }
 
+    func testDetachAndReattachUpdateTheTotals() async throws {
+        try write("a/b/big.bin", bytes: 100_000)
+        try write("a/small.bin", bytes: 10_000)
+
+        let result = await Scanner().scan(root)
+        let a = try XCTUnwrap(result.root.child(named: "a"))
+        let b = try XCTUnwrap(a.child(named: "b"))
+        let total = result.totalSize
+
+        b.detach()
+
+        XCTAssertNil(a.child(named: "b"))
+        XCTAssertEqual(result.totalSize, total - b.size)
+        XCTAssertEqual(result.fileCount, 1)
+
+        a.reattach(b)
+
+        XCTAssertEqual(a.children.first?.name, "b")
+        XCTAssertEqual(result.totalSize, total)
+        XCTAssertEqual(result.fileCount, 2)
+    }
+
     func testSymbolicLinkIsNotFollowed() async throws {
         try write("data/big.bin", bytes: 500_000)
         try files.createSymbolicLink(
