@@ -40,11 +40,11 @@ struct ContentView: View {
                     Label("Scan Folder…", systemImage: "folder")
                 }
                 Button {
-                    if let selection = model.selection { model.reveal(selection) }
+                    model.reveal(model.selectedItems)
                 } label: {
                     Label("Reveal in Finder", systemImage: "magnifyingglass")
                 }
-                .disabled(model.selection == nil)
+                .disabled(model.selection.isEmpty)
             }
         }
         .disabled(model.isScanning)

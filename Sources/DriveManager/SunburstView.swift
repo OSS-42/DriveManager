@@ -1,14 +1,17 @@
+import AppKit
 import DriveCore
 import SwiftUI
 
 /// Rings of folders around the folder at the middle: each ring is one level
 /// deeper, and each segment's angle is its share of the middle folder.
-/// Clicking a segment selects it; clicking the middle goes up one folder.
+/// Clicking a segment selects it, and highlights it in the tree; Command-click
+/// adds it to the selection. Double-clicking a folder puts it in the middle,
+/// and clicking the middle goes up one folder.
 struct SunburstView: View {
     let model: ScanModel
     @State private var hovered: FileNode?
 
-    private static let rings = 4
+    private static let rings = ScanModel.rings
 
     var body: some View {
         if let center = model.center {
@@ -17,14 +20,21 @@ struct SunburstView: View {
                 let geometry = SunburstGeometry(size: proxy.size, rings: Self.rings)
                 ZStack {
                     Canvas { context, _ in
+                        let separator = Color(nsColor: .windowBackgroundColor)
                         for segment in segments {
                             let path = geometry.path(for: segment)
                             context.fill(path, with: .color(color(for: segment)))
-                            context.stroke(path, with: .color(Color(nsColor: .windowBackgroundColor)), lineWidth: 0.75)
+                            context.stroke(path, with: .color(separator), lineWidth: 0.75)
+                        }
+                        // Outline selected items on top, so neighbours don't cover the outline.
+                        for segment in segments where model.isSelected(segment.node) {
+                            let path = geometry.path(for: segment)
+                            context.stroke(path, with: .color(separator), lineWidth: 5)
+                            context.stroke(path, with: .color(.accentColor), lineWidth: 2.5)
                         }
                         context.fill(Path(ellipseIn: geometry.holeRect), with: .color(Color.secondary.opacity(0.12)))
                     }
-                    label(for: hovered ?? model.selection ?? center)
+                    label(for: hovered ?? model.focus ?? center)
                         .frame(width: geometry.holeRadius * 1.7)
                         .position(geometry.center)
                         .allowsHitTesting(false)
@@ -38,11 +48,17 @@ struct SunburstView: View {
                         hovered = nil
                     }
                 }
+                .onTapGesture(count: 2) { location in
+                    if let segment = geometry.segment(at: location, in: segments) {
+                        model.zoom(into: segment.node)
+                    }
+                }
                 .onTapGesture { location in
                     if geometry.isInHole(location) {
                         model.goUp()
                     } else if let segment = geometry.segment(at: location, in: segments) {
-                        model.select(segment.node, expand: true)
+                        let adding = NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift)
+                        model.select(segment.node, adding: adding)
                     }
                 }
             }
@@ -79,7 +95,7 @@ struct SunburstView: View {
         if !segment.node.isDirectory {
             saturation *= 0.45
         }
-        if segment.node === hovered || segment.node === model.selection {
+        if segment.node === hovered || model.isSelected(segment.node) {
             saturation = min(1, saturation + 0.2)
             brightness = 1
         }

@@ -1,13 +1,14 @@
 import DriveCore
 import SwiftUI
 
-/// The path of the selected item, one button per folder.
+/// The path of the item clicked last, one button per folder, and a summary
+/// of the selection.
 struct PathBar: View {
     let model: ScanModel
 
     private var chain: [FileNode] {
         var chain: [FileNode] = []
-        var node = model.selection ?? model.center
+        var node = model.focus ?? model.center
         while let current = node {
             chain.append(current)
             node = current.parent
@@ -16,6 +17,14 @@ struct PathBar: View {
     }
 
     var body: some View {
+        HStack {
+            path
+            Spacer()
+            selectionSummary
+        }
+    }
+
+    private var path: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(Array(chain.enumerated()), id: \.element.id) { index, node in
@@ -25,14 +34,30 @@ struct PathBar: View {
                             .foregroundStyle(.tertiary)
                     }
                     Button(node.name) {
-                        model.select(node, expand: true)
+                        model.select(node)
+                        model.zoom(into: node)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(node === model.selection ? .primary : .secondary)
+                    .foregroundStyle(node === model.focus ? .primary : .secondary)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var selectionSummary: some View {
+        let items = model.selectedItems
+        if items.count > 1 {
+            let size = items.reduce(Int64(0)) { $0 + $1.size }
+            HStack(spacing: 8) {
+                Text("\(items.count) items selected, \(Format.bytes(size))")
+                    .foregroundStyle(.secondary)
+                Button("Clear") { model.clearSelection() }
+                    .buttonStyle(.link)
+            }
+            .padding(.trailing, 12)
         }
     }
 }
