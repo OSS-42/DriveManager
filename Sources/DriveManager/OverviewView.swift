@@ -151,6 +151,9 @@ private struct SuggestionRow: View {
             .padding(.bottom, 8)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if let explain = suggestion.rule.explain {
+                    ExplainButton(title: suggestion.rule.title, explain: explain)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.rule.title).font(.headline)
                     Text(suggestion.rule.detail)
@@ -170,6 +173,43 @@ private struct SuggestionRow: View {
                 .frame(width: 80)
             }
             .padding(.vertical, 8)
+        }
+    }
+}
+
+/// A "?" button that shows what a suggestion is, why it is there and how to
+/// clear it.
+private struct ExplainButton: View {
+    let title: String
+    let explain: CleanupRule.Explanation
+    @State private var isShown = false
+
+    var body: some View {
+        Button {
+            isShown.toggle()
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("What is this?")
+        .popover(isPresented: $isShown, arrowEdge: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title).font(.headline)
+                part("What is it?", explain.what)
+                part("Why is it here?", explain.why)
+                part("How do I clear it?", explain.how)
+            }
+            .padding(16)
+            .frame(width: 360, alignment: .leading)
+        }
+    }
+
+    private func part(_ heading: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(heading).font(.subheadline.weight(.semibold))
+            Text(text).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

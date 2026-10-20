@@ -31,6 +31,17 @@ public struct CleanupRule: Codable, Sendable, Equatable {
     /// Leaves out the most recently changed item of each kind in each folder,
     /// so the latest build of an app stays when older ones are suggested.
     public var keepNewest: Bool? = nil
+    /// A plain-language explanation, shown when the user asks about the rule.
+    public var explain: Explanation? = nil
+
+    public struct Explanation: Codable, Sendable, Equatable {
+        /// What the items are.
+        public let what: String
+        /// Why they are on the disk.
+        public let why: String
+        /// How to remove them, and whether they come back.
+        public let how: String
+    }
 }
 
 /// Items one rule found, and their total size.
