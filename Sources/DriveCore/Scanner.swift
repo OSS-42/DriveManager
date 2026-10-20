@@ -64,6 +64,8 @@ public final class Scanner: @unchecked Sendable {
     private var unreadable: [String] = []
 
     public init(options: ScanOptions = ScanOptions()) {
+        var options = options
+        options.excludedPaths = Set(options.excludedPaths.map(Self.trimmingTrailingSlash))
         self.options = options
     }
 
@@ -75,24 +77,27 @@ public final class Scanner: @unchecked Sendable {
         }
 
         let rootURL = url.standardizedFileURL
+        let rootPath = Self.trimmingTrailingSlash(rootURL.path)
         let root: FileNode
-        if let single = entry(for: rootURL, name: rootURL.path), !single.isDirectory {
+        if let single = entry(for: rootURL, path: rootPath, name: rootPath), !single.isDirectory {
             root = single
         } else {
-            root = FileNode(name: rootURL.path, isDirectory: true)
-            var folders: [(URL, FileNode)] = []
+            root = FileNode(name: rootPath, isDirectory: true)
+            var folders: [(URL, String, FileNode)] = []
             for childURL in listDirectory(rootURL) {
-                guard let child = entry(for: childURL, name: childURL.lastPathComponent) else { continue }
+                let name = childURL.lastPathComponent
+                let childPath = Self.join(rootPath, name)
+                guard let child = entry(for: childURL, path: childPath, name: name) else { continue }
                 if child.isDirectory {
-                    folders.append((childURL, child))
+                    folders.append((childURL, childPath, child))
                 } else {
                     root.add(child)
                 }
             }
             await withTaskGroup(of: FileNode.self) { group in
-                for (folderURL, folder) in folders {
+                for (folderURL, folderPath, folder) in folders {
                     group.addTask { [self] in
-                        walk(folderURL, into: folder)
+                        walk(folderURL, path: folderPath, into: folder)
                         return folder
                     }
                 }
@@ -107,14 +112,30 @@ public final class Scanner: @unchecked Sendable {
         return ScanResult(root: root, duration: Date().timeIntervalSince(start), unreadablePaths: unreadablePaths)
     }
 
-    private func walk(_ url: URL, into folder: FileNode) {
+    private func walk(_ url: URL, path: String, into folder: FileNode) {
         for childURL in listDirectory(url) {
-            guard let child = entry(for: childURL, name: childURL.lastPathComponent) else { continue }
+            let name = childURL.lastPathComponent
+            let childPath = Self.join(path, name)
+            guard let child = entry(for: childURL, path: childPath, name: name) else { continue }
             if child.isDirectory {
-                walk(childURL, into: child)
+                walk(childURL, path: childPath, into: child)
             }
             folder.add(child)
         }
+    }
+
+    /// Paths are built from the scan root and item names rather than read back
+    /// from URLs, so they compare reliably with `excludedPaths`.
+    private static func join(_ parent: String, _ name: String) -> String {
+        parent.hasSuffix("/") ? parent + name : parent + "/" + name
+    }
+
+    private static func trimmingTrailingSlash(_ path: String) -> String {
+        var path = path
+        while path.count > 1 && path.hasSuffix("/") {
+            path.removeLast()
+        }
+        return path
     }
 
     private func listDirectory(_ url: URL) -> [URL] {
@@ -132,8 +153,8 @@ public final class Scanner: @unchecked Sendable {
 
     /// A node for one item, or nil when it is excluded or cannot be read.
     /// A folder comes back empty; the caller walks it.
-    private func entry(for url: URL, name: String) -> FileNode? {
-        if options.excludedPaths.contains(url.path) { return nil }
+    private func entry(for url: URL, path: String, name: String) -> FileNode? {
+        if options.excludedPaths.contains(path) { return nil }
         guard let values = try? url.resourceValues(forKeys: Self.keySet) else { return nil }
 
         if values.isDirectory == true && values.isSymbolicLink != true {
