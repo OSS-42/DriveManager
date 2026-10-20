@@ -19,7 +19,7 @@ Milestones, each ending in something runnable:
 4. Suggestions + health score: rules engine reading a JSON rules file.
 5. Polish: scan cache, low-space alert, duplicate finder.
 
-Planned layout: a Swift package with a `DriveCore` library (scanner, index, rules, cleaner) and a `drive-scan` CLI, then a SwiftUI app target that depends on `DriveCore`.
+Planned layout: a Swift package with a `DriveCore` library (scanner, index, rules, cleaner) and a `drive-scan` CLI, and a SwiftUI app target `DriveManager` that depends on `DriveCore`. Pure logic the app needs (such as `SunburstLayout`) lives in `DriveCore` so it can be tested.
 
 ## Safety rules (non-negotiable)
 
@@ -31,6 +31,7 @@ Planned layout: a Swift package with a `DriveCore` library (scanner, index, rule
 
 ## Working in this repo
 
+- `./scripts/make-app.sh` builds `build/DriveManager.app` (ad-hoc signed, no developer account); `swift run DriveManager` starts the app without a bundle for a quick look.
 - `swift run -c release drive-scan` scans the whole startup disk and `drive-scan ~` your home folder; `sudo .build/release/drive-scan` also reads system folders; `drive-scan --help` lists the options. Give your terminal Full Disk Access first, or some folders read as empty.
 - `swift test` runs the tests.
 

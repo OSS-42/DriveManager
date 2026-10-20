@@ -32,3 +32,6 @@ jobs:
           else
             echo "No Package.swift yet, nothing to test."
           fi
+
+      - name: Package the app
+        run: ./scripts/make-app.sh
