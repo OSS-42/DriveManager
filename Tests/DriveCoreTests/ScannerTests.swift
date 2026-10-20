@@ -126,4 +126,16 @@ final class ScannerTests: XCTestCase {
 
         XCTAssertEqual(c.path, root.path + "/a/b/c.bin")
     }
+
+    func testVolumeIsReportedForAFolderScan() async throws {
+        try write("file.bin", bytes: 1_000)
+
+        let result = await Scanner().scan(root)
+        let volume = try XCTUnwrap(result.volume)
+
+        XCTAssertGreaterThan(volume.totalCapacity, 0)
+        XCTAssertGreaterThanOrEqual(volume.used, 0)
+        XCTAssertFalse(result.scannedWholeVolume)
+        XCTAssertNil(result.hiddenSize)
+    }
 }
