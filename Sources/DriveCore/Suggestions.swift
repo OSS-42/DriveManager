@@ -14,7 +14,8 @@ public enum SafetyLevel: String, Codable, Sendable, CaseIterable {
 /// One kind of junk: where to look for it and how safe it is to remove.
 ///
 /// Each path may start with `~` for the home folder, and any part of it may
-/// use `*` and `?` wildcards, as in `~/Library/Caches/*`.
+/// use `*` and `?` wildcards, as in `~/Library/Caches/*`. A `**` part stands
+/// for any number of folders, hidden ones aside, as in `~/**/*.apk`.
 public struct CleanupRule: Codable, Sendable, Equatable {
     public let id: String
     public let title: String
@@ -25,6 +26,11 @@ public struct CleanupRule: Codable, Sendable, Equatable {
     public let minSize: Int64?
     /// Items changed more recently than this many days ago are left out.
     public let minAgeDays: Int?
+    /// Paths, in the same form as `paths`, whose contents this rule skips.
+    public var exceptPaths: [String]? = nil
+    /// Leaves out the most recently changed item of each kind in each folder,
+    /// so the latest build of an app stays when older ones are suggested.
+    public var keepNewest: Bool? = nil
 }
 
 /// Items one rule found, and their total size.
@@ -80,14 +86,21 @@ public enum SuggestionEngine {
         var claimed = Set<ObjectIdentifier>()
         var suggestions: [Suggestion] = []
         for rule in rules {
+            let excepted = Set((rule.exceptPaths ?? []).flatMap {
+                matches(of: expand($0, home: home), in: root).map(ObjectIdentifier.init)
+            })
             var items: [FileNode] = []
+            var found = Set<ObjectIdentifier>()
             for pattern in rule.paths {
                 for node in matches(of: expand(pattern, home: home), in: root) {
                     let path = node.path
                     guard node.size > 0,
                           node.size >= (rule.minSize ?? 0),
                           !claimed.contains(ObjectIdentifier(node)),
+                          !found.contains(ObjectIdentifier(node)),
                           !isInside(node, anyOf: claimed),
+                          !excepted.contains(ObjectIdentifier(node)),
+                          !isInside(node, anyOf: excepted),
                           Protection.reason(forPath: path, home: home) == nil,
                           !blocked.contains(where: { path == $0 || path.hasPrefix($0 + "/") })
                     else { continue }
@@ -96,10 +109,14 @@ public enum SuggestionEngine {
                               now.timeIntervalSince(date) >= Double(days) * 86_400
                         else { continue }
                     }
-                    claimed.insert(ObjectIdentifier(node))
+                    found.insert(ObjectIdentifier(node))
                     items.append(node)
                 }
             }
+            if rule.keepNewest == true {
+                items = withoutNewest(items, modificationDate: modificationDate)
+            }
+            for node in items { claimed.insert(ObjectIdentifier(node)) }
             if !items.isEmpty {
                 suggestions.append(Suggestion(rule: rule, items: items.sorted { $0.size > $1.size }))
             }
@@ -125,6 +142,10 @@ public enum SuggestionEngine {
         let parts = pattern.dropFirst(prefix.count).split(separator: "/").map(String.init)
         var level = [root]
         for part in parts {
+            if part == "**" {
+                level = level.flatMap { [$0] + visibleFolders(under: $0) }
+                continue
+            }
             let hasWildcard = part.contains("*") || part.contains("?")
             level = level.flatMap { folder in
                 folder.children.filter { child in
@@ -134,6 +155,27 @@ public enum SuggestionEngine {
             if level.isEmpty { break }
         }
         return level
+    }
+
+    /// Every folder below `folder`, leaving out hidden ones and what is in them.
+    private static func visibleFolders(under folder: FileNode) -> [FileNode] {
+        folder.children.filter { $0.isDirectory && !$0.name.hasPrefix(".") }
+            .flatMap { [$0] + visibleFolders(under: $0) }
+    }
+
+    /// `items` without the most recently changed one of each extension in
+    /// each folder.
+    private static func withoutNewest(_ items: [FileNode], modificationDate: (String) -> Date?) -> [FileNode] {
+        struct Kind: Hashable { let folder: ObjectIdentifier?; let fileExtension: String }
+        let groups = Dictionary(grouping: items) { node in
+            Kind(folder: node.parent.map(ObjectIdentifier.init), fileExtension: (node.name as NSString).pathExtension.lowercased())
+        }
+        var newest = Set<ObjectIdentifier>()
+        for group in groups.values {
+            let latest = group.max { (modificationDate($0.path) ?? .distantPast) < (modificationDate($1.path) ?? .distantPast) }
+            if let latest { newest.insert(ObjectIdentifier(latest)) }
+        }
+        return items.filter { !newest.contains(ObjectIdentifier($0)) }
     }
 
     private static func isInside(_ node: FileNode, anyOf ids: Set<ObjectIdentifier>) -> Bool {

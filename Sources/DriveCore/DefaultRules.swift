@@ -95,6 +95,16 @@ let defaultRulesJSON = #"""
     "detail": "Local backups made by Finder. Keep the latest one unless it is also in iCloud.",
     "level": "careful",
     "paths": ["~/Library/Application Support/MobileSync/Backup/*"]
+  },
+  {
+    "id": "old-app-builds",
+    "title": "Old app builds",
+    "detail": "Earlier Android and iOS builds of your apps. The newest build in each folder is kept. Older ones may be the only copy of a version you released.",
+    "level": "review",
+    "paths": ["~/**/*.apk", "~/**/*.aab", "~/**/*.ipa"],
+    "exceptPaths": ["~/Library"],
+    "minSize": 1000000,
+    "keepNewest": true
   }
 ]
 """#
