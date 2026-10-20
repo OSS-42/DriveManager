@@ -57,4 +57,32 @@ public final class FileNode: @unchecked Sendable {
         if rest.isEmpty { return rootPath }
         return rootPath.hasSuffix("/") ? rootPath + rest : rootPath + "/" + rest
     }
+
+    /// Takes this item out of its folder, as after moving it to the Trash,
+    /// and takes its size and file count off every folder above it.
+    public func detach() {
+        guard let parent else { return }
+        parent.children.removeAll { $0 === self }
+        var folder: FileNode? = parent
+        while let current = folder {
+            current.size -= size
+            current.fileCount -= fileCount
+            folder = current.parent
+        }
+        self.parent = nil
+    }
+
+    /// Puts a detached item back into this folder, as after an undo, keeping
+    /// the children sorted and adding its totals to every folder above.
+    public func reattach(_ child: FileNode) {
+        child.parent = self
+        let index = children.firstIndex { $0.size < child.size } ?? children.count
+        children.insert(child, at: index)
+        var folder: FileNode? = self
+        while let current = folder {
+            current.size += child.size
+            current.fileCount += child.fileCount
+            folder = current.parent
+        }
+    }
 }

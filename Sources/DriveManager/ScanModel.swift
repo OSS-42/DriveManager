@@ -2,7 +2,7 @@ import AppKit
 import DriveCore
 import Observation
 
-extension FileNode: @retroactive Identifiable {}
+extension FileNode: Identifiable {}
 
 /// The state of the window: the current scan and what is selected in it.
 ///
@@ -16,6 +16,20 @@ final class ScanModel {
         case idle
         case scanning(URL)
         case done
+    }
+
+    /// Items moved to the Trash in one go, kept so the move can be undone.
+    struct TrashBatch {
+        struct Item {
+            let record: TrashRecord
+            let node: FileNode
+            let parent: FileNode
+        }
+
+        let items: [Item]
+        let skipped: [SkippedItem]
+
+        var size: Int64 { items.reduce(0) { $0 + $1.record.size } }
     }
 
     /// A visible line of the folder tree.
@@ -34,6 +48,12 @@ final class ScanModel {
     /// The folder at the middle of the sunburst.
     private(set) var center: FileNode?
     private var expanded: Set<ObjectIdentifier> = []
+    /// The last move to the Trash, until it is undone or dismissed.
+    private(set) var lastTrash: TrashBatch?
+    /// Bumped when items leave or return to the tree. FileNode is not
+    /// observable, so views read this to redraw after such a change.
+    private(set) var revision = 0
+    private let cleaner = Cleaner()
 
     /// How many rings the sunburst draws around its center.
     static let rings = 4
@@ -66,6 +86,7 @@ final class ScanModel {
         focus = nil
         center = nil
         expanded = []
+        lastTrash = nil
         Task {
             let result = await Task.detached(priority: .userInitiated) {
                 await Scanner().scan(url)
@@ -135,6 +156,48 @@ final class ScanModel {
         selection = [:]
     }
 
+    func deselect(_ node: FileNode) {
+        selection.removeValue(forKey: node.id)
+    }
+
+    /// Moves the selected items to the Trash and takes them out of the tree.
+    /// Protected items stay where they are and are listed as skipped.
+    func moveSelectionToTrash() {
+        let items = selectedItems
+        let byPath = Dictionary(items.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        let outcome = cleaner.moveToTrash(items.map { (path: $0.path, size: $0.size) })
+        var moved: [TrashBatch.Item] = []
+        for record in outcome.moved {
+            guard let node = byPath[record.originalPath], let parent = node.parent else { continue }
+            if let center, center === node || ancestors(of: center).contains(where: { $0 === node }) {
+                self.center = parent
+            }
+            if let focus, focus === node || ancestors(of: focus).contains(where: { $0 === node }) {
+                self.focus = parent
+            }
+            node.detach()
+            moved.append(TrashBatch.Item(record: record, node: node, parent: parent))
+        }
+        selection = selection.filter { _, node in outcome.skipped.contains { $0.path == node.path } }
+        lastTrash = TrashBatch(items: moved, skipped: outcome.skipped)
+        revision += 1
+    }
+
+    /// Puts the last batch back from the Trash and into the tree.
+    func undoLastTrash() {
+        guard let batch = lastTrash else { return }
+        let restored = cleaner.putBack(batch.items.map(\.record))
+        for item in batch.items where restored.contains(item.record) {
+            item.parent.reattach(item.node)
+        }
+        lastTrash = nil
+        revision += 1
+    }
+
+    func dismissLastTrash() {
+        lastTrash = nil
+    }
+
     private func reveal(inTree node: FileNode) {
         for ancestor in ancestors(of: node) {
             expanded.insert(ancestor.id)
@@ -183,6 +246,7 @@ final class ScanModel {
     /// The tree's visible lines: the root, then the children of every open
     /// folder, largest first.
     var rows: [Row] {
+        _ = revision
         guard let root = result?.root else { return [] }
         var rows: [Row] = []
         addRows(for: root, depth: 0, into: &rows)

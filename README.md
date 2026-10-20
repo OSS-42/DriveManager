@@ -9,7 +9,7 @@ What it will do:
 - Suggest what to clean (Xcode caches, old simulators, app caches, old backups, installers and more), each labelled Safe, Review or Careful.
 - Move what you select to the Trash, with one-click undo.
 
-Status: milestone 2, the explorer app, is in progress. Build and open it:
+Status: milestones 1 and 2 (scanner, explorer) are done; milestone 3, safe delete, is in progress. Build and open it:
 
 ```sh
 ./scripts/make-app.sh

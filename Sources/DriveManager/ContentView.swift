@@ -16,13 +16,22 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .done:
                 if let result = model.result {
+                    let _ = model.revision
                     PathBar(model: model)
                     Divider()
+                    if let batch = model.lastTrash {
+                        TrashBanner(model: model, batch: batch)
+                        Divider()
+                    }
                     HSplitView {
                         TreeView(model: model)
                             .frame(minWidth: 340, idealWidth: 460)
                         SunburstView(model: model)
                             .frame(minWidth: 360)
+                        if !model.selection.isEmpty {
+                            SelectedTray(model: model)
+                                .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
+                        }
                     }
                     Divider()
                     DiskBar(result: result)
