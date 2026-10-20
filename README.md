@@ -9,6 +9,6 @@ What it will do:
 - Suggest what to clean (Xcode caches, old simulators, app caches, old backups, installers and more), each labelled Safe, Review or Careful.
 - Move what you select to the Trash, with one-click undo.
 
-Status: planning done, milestone 1 (the scanner) is next. See `CLAUDE.md` for the plan and decisions.
+Status: planning done, milestone 1 (the scanner) is next. See `DriveManager.md` for the plan and decisions.
 
 Requirements: macOS 26, Xcode 26.
