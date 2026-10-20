@@ -94,7 +94,8 @@ public final class Cleaner: @unchecked Sendable {
             }
         }
         if !restored.isEmpty {
-            updateLog { log in log.removeAll { restored.contains($0) } }
+            let putBackPaths = Set(restored.map(\.trashedPath))
+            updateLog { log in log.removeAll { putBackPaths.contains($0.trashedPath) } }
         }
         return restored
     }
@@ -109,8 +110,9 @@ public final class Cleaner: @unchecked Sendable {
             var log = readLog()
             change(&log)
             try? files.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // The default date encoding keeps full precision, so records read
+            // back from the log equal the ones handed out.
             let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
             if let data = try? encoder.encode(log) {
                 try? data.write(to: logURL, options: .atomic)
@@ -120,9 +122,7 @@ public final class Cleaner: @unchecked Sendable {
 
     private func readLog() -> [TrashRecord] {
         guard let data = try? Data(contentsOf: logURL) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([TrashRecord].self, from: data)) ?? []
+        return (try? JSONDecoder().decode([TrashRecord].self, from: data)) ?? []
     }
 
     private func isSymbolicLink(_ path: String) -> Bool {

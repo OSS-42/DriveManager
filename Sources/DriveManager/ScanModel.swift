@@ -2,7 +2,7 @@ import AppKit
 import DriveCore
 import Observation
 
-extension FileNode: @retroactive Identifiable {}
+extension FileNode: Identifiable {}
 
 /// The state of the window: the current scan and what is selected in it.
 ///
