@@ -34,6 +34,10 @@ public struct ScanResult: Sendable {
     /// Folders that could not be read, usually for lack of Full Disk Access
     /// or, for system folders, of administrator rights.
     public let unreadablePaths: [String]
+    /// Other disks mounted inside the scanned folder, such as disk images or
+    /// Xcode simulator runtimes. They are skipped: their content is stored
+    /// elsewhere, often in an image file the scan already counted.
+    public let otherDiskPaths: [String]
     /// The disk the scan ran on, when macOS reports it.
     public let volume: VolumeInfo?
 
@@ -74,6 +78,9 @@ public final class Scanner: @unchecked Sendable {
     private let lock = NSLock()
     private var seenHardLinks = Set<HardLinkID>()
     private var unreadable: [String] = []
+    private var otherDisks: [String] = []
+    /// Set before each scan starts and only read while it runs.
+    private var allowedDevices = Set<Int32>()
 
     public init(options: ScanOptions = ScanOptions()) {
         var options = options
@@ -86,6 +93,7 @@ public final class Scanner: @unchecked Sendable {
         lock.withLock {
             seenHardLinks.removeAll()
             unreadable.removeAll()
+            otherDisks.removeAll()
         }
 
         let rootURL = url.standardizedFileURL
@@ -97,61 +105,74 @@ public final class Scanner: @unchecked Sendable {
             root = FileNode(name: rootPath, isDirectory: false, size: Int64(size), fileCount: 1)
         } else {
             root = FileNode(name: rootPath, isDirectory: true)
+            allowedDevices = Self.devices(for: rootPath)
             await scanFolder(rootPath, into: root, depth: 0)
             root.sortBySize()
         }
 
-        let unreadablePaths = lock.withLock { unreadable.sorted() }
+        let (unreadablePaths, otherDiskPaths) = lock.withLock { (unreadable.sorted(), otherDisks.sorted()) }
         return ScanResult(
             root: root,
             duration: Date().timeIntervalSince(start),
             unreadablePaths: unreadablePaths,
+            otherDiskPaths: otherDiskPaths,
             volume: VolumeInfo(for: rootURL)
         )
     }
 
-    private func scanFolder(_ path: String, into folder: FileNode, depth: Int) async {
-        let subfolders = readFolder(path, into: folder)
+    /// Scans the folder into `folder`. Returns false, leaving it empty, when
+    /// the folder is another disk mounted inside the scan.
+    @discardableResult
+    private func scanFolder(_ path: String, into folder: FileNode, depth: Int) async -> Bool {
+        guard let subfolders = readFolder(path, into: folder) else { return false }
         if subfolders.count > 1 && depth < Self.parallelDepth {
-            await withTaskGroup(of: FileNode.self) { group in
+            await withTaskGroup(of: FileNode?.self) { group in
                 for (childPath, child) in subfolders {
                     group.addTask { [self] in
-                        await scanFolder(childPath, into: child, depth: depth + 1)
-                        return child
+                        await scanFolder(childPath, into: child, depth: depth + 1) ? child : nil
                     }
                 }
                 for await child in group {
-                    folder.add(child)
+                    if let child { folder.add(child) }
                 }
             }
         } else {
             for (childPath, child) in subfolders {
+                let isSameDisk: Bool
                 if depth < Self.parallelDepth {
-                    await scanFolder(childPath, into: child, depth: depth + 1)
+                    isSameDisk = await scanFolder(childPath, into: child, depth: depth + 1)
                 } else {
-                    walk(childPath, into: child)
+                    isSameDisk = walk(childPath, into: child)
                 }
-                folder.add(child)
+                if isSameDisk { folder.add(child) }
             }
         }
+        return true
     }
 
-    private func walk(_ path: String, into folder: FileNode) {
-        for (childPath, child) in readFolder(path, into: folder) {
-            walk(childPath, into: child)
-            folder.add(child)
+    @discardableResult
+    private func walk(_ path: String, into folder: FileNode) -> Bool {
+        guard let subfolders = readFolder(path, into: folder) else { return false }
+        for (childPath, child) in subfolders {
+            if walk(childPath, into: child) { folder.add(child) }
         }
+        return true
     }
 
     /// Adds the folder's files to it and returns its subfolders, still empty,
-    /// for the caller to scan and add.
-    private func readFolder(_ path: String, into folder: FileNode) -> [(String, FileNode)] {
-        guard let entries = DirectoryReader.read(path) else {
+    /// for the caller to scan and add. Returns nil when the folder is on a
+    /// disk other than the scanned one.
+    private func readFolder(_ path: String, into folder: FileNode) -> [(String, FileNode)]? {
+        guard let listing = DirectoryReader.read(path) else {
             lock.withLock { unreadable.append(path) }
             return []
         }
+        guard allowedDevices.contains(listing.device) else {
+            lock.withLock { otherDisks.append(path) }
+            return nil
+        }
         var subfolders: [(String, FileNode)] = []
-        for entry in entries {
+        for entry in listing.entries {
             let childPath = Self.join(path, entry.name)
             if options.excludedPaths.contains(childPath) { continue }
             if entry.kind == .directory {
@@ -165,6 +186,19 @@ public final class Scanner: @unchecked Sendable {
             folder.add(FileNode(name: entry.name, isDirectory: false, size: size, fileCount: 1))
         }
         return subfolders
+    }
+
+    /// The disks the scan stays on: the root's, plus the data volume when
+    /// scanning "/", since /Users, /Applications and the rest live there.
+    private static func devices(for rootPath: String) -> Set<Int32> {
+        var devices = Set<Int32>()
+        var paths = [rootPath]
+        if rootPath == "/" { paths.append("/System/Volumes/Data") }
+        for path in paths {
+            var info = stat()
+            if stat(path, &info) == 0 { devices.insert(info.st_dev) }
+        }
+        return devices
     }
 
     /// Paths are built from the scan root and item names, so they compare

@@ -30,6 +30,17 @@ enum Report {
         lines.append(pad("Size", 10) + "  " + pad("Share", 6) + "  " + pad("Files", 10) + "  Name")
         addRows(for: result.root, level: 0, depth: depth, top: top, total: result.totalSize, into: &lines)
 
+        if !result.otherDiskPaths.isEmpty {
+            lines.append("")
+            lines.append("Skipped \(number(result.otherDiskPaths.count)) other disks mounted inside the scan:")
+            for path in result.otherDiskPaths.prefix(5) {
+                lines.append("  \(path)")
+            }
+            if result.otherDiskPaths.count > 5 {
+                lines.append("  and \(number(result.otherDiskPaths.count - 5)) more")
+            }
+        }
+
         if !result.unreadablePaths.isEmpty {
             lines.append("")
             lines.append("\(number(result.unreadablePaths.count)) folders could not be read, so the totals are low.")
@@ -100,6 +111,7 @@ enum Report {
             let volumePurgeable: Int64?
             let hiddenSize: Int64?
             let unreadablePaths: [String]
+            let otherDiskPaths: [String]
             let root: JSONNode
         }
         let output = Output(
@@ -110,6 +122,7 @@ enum Report {
             volumePurgeable: result.volume?.purgeable,
             hiddenSize: result.hiddenSize,
             unreadablePaths: result.unreadablePaths,
+            otherDiskPaths: result.otherDiskPaths,
             root: jsonNode(result.root, level: 0, depth: depth, top: top)
         )
         let encoder = JSONEncoder()
