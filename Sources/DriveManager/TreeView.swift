@@ -2,7 +2,9 @@ import DriveCore
 import SwiftUI
 
 /// The folder tree: every open folder's items, largest first, each with its
-/// size and its share of the folder it is in.
+/// size and its share of the folder it is in. Command-click and Shift-click
+/// select several items; double-clicking a folder puts it in the middle
+/// of the sunburst.
 struct TreeView: View {
     let model: ScanModel
 
@@ -14,11 +16,18 @@ struct TreeView: View {
                     isExpanded: model.isExpanded(row.node),
                     toggle: { model.toggle(row.node) }
                 )
-                .contextMenu {
-                    Button("Reveal in Finder") { model.reveal(row.node) }
+            }
+            .contextMenu(forSelectionType: ObjectIdentifier.self) { ids in
+                let nodes = model.rows.filter { ids.contains($0.id) }.map(\.node)
+                Button("Reveal in Finder") { model.reveal(nodes) }
+                    .disabled(nodes.isEmpty)
+            } primaryAction: { ids in
+                // Double-click: put a folder in the middle of the sunburst.
+                if ids.count == 1, let row = model.rows.first(where: { ids.contains($0.id) }) {
+                    model.zoom(into: row.node)
                 }
             }
-            .onChange(of: model.selection?.id) { _, id in
+            .onChange(of: model.focus?.id) { _, id in
                 if let id {
                     proxy.scrollTo(id)
                 }
@@ -26,10 +35,10 @@ struct TreeView: View {
         }
     }
 
-    private var selection: Binding<ObjectIdentifier?> {
+    private var selection: Binding<Set<ObjectIdentifier>> {
         Binding(
-            get: { model.selection?.id },
-            set: { id in model.select(model.rows.first { $0.id == id }?.node) }
+            get: { model.selectedIDs },
+            set: { ids in model.setSelection(ids) }
         )
     }
 }

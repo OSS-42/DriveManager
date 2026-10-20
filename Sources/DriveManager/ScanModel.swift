@@ -7,7 +7,8 @@ extension FileNode: @retroactive Identifiable {}
 /// The state of the window: the current scan and what is selected in it.
 ///
 /// The folder tree and the sunburst both read and change the selection here,
-/// which is what keeps them in sync.
+/// which is what keeps them in sync: an item selected in one is highlighted
+/// in the other.
 @MainActor
 @Observable
 final class ScanModel {
@@ -26,20 +27,43 @@ final class ScanModel {
 
     private(set) var phase: Phase = .idle
     private(set) var result: ScanResult?
-    private(set) var selection: FileNode?
+    /// Everything selected, in the tree or in the sunburst.
+    private(set) var selection: [ObjectIdentifier: FileNode] = [:]
+    /// The item clicked last. The path bar and the sunburst's label show it.
+    private(set) var focus: FileNode?
     /// The folder at the middle of the sunburst.
     private(set) var center: FileNode?
     private var expanded: Set<ObjectIdentifier> = []
+
+    /// How many rings the sunburst draws around its center.
+    static let rings = 4
 
     var isScanning: Bool {
         if case .scanning = phase { return true }
         return false
     }
 
+    var selectedIDs: Set<ObjectIdentifier> {
+        Set(selection.keys)
+    }
+
+    /// Selected items, without those inside another selected folder, so
+    /// nothing is listed or counted twice.
+    var selectedItems: [FileNode] {
+        selection.values
+            .filter { node in !ancestors(of: node).contains { selection[$0.id] != nil } }
+            .sorted { $0.size > $1.size }
+    }
+
+    func isSelected(_ node: FileNode) -> Bool {
+        selection[node.id] != nil
+    }
+
     func scan(_ url: URL) {
         phase = .scanning(url)
         result = nil
-        selection = nil
+        selection = [:]
+        focus = nil
         center = nil
         expanded = []
         Task {
@@ -53,27 +77,91 @@ final class ScanModel {
         }
     }
 
-    /// Selects an item, centers the sunburst on it (or on its folder, for a
-    /// file) and opens the tree down to it. With `expand`, a selected folder
-    /// is opened too, so the tree shows what the sunburst shows.
-    func select(_ node: FileNode?, expand: Bool = false) {
-        guard let node else { return }
-        selection = node
-        center = node.isDirectory ? node : (node.parent ?? node)
-        var ancestor = node.parent
-        while let current = ancestor {
-            expanded.insert(current.id)
-            ancestor = current.parent
+    /// Selects an item, or with `adding` adds it to the selection (or takes
+    /// it out if it is already in). The tree opens down to the item and the
+    /// sunburst moves only if the item is outside the rings it shows.
+    func select(_ node: FileNode, adding: Bool = false) {
+        if adding {
+            if selection.removeValue(forKey: node.id) == nil {
+                selection[node.id] = node
+            }
+        } else {
+            selection = [node.id: node]
         }
-        if expand && node.isDirectory {
-            expanded.insert(node.id)
+        focus = node
+        reveal(inTree: node)
+        if !isShownInSunburst(node) {
+            center = node.parent ?? node
         }
+    }
+
+    /// Takes the tree's selection, which changes with Command- and
+    /// Shift-clicks, and shows the newly picked item in the sunburst.
+    func setSelection(_ ids: Set<ObjectIdentifier>) {
+        // Items selected in the sunburst may sit in folders the tree has closed.
+        var visible: [ObjectIdentifier: FileNode] = [:]
+        for row in rows where ids.contains(row.id) {
+            visible[row.id] = row.node
+        }
+        let nodes = ids.compactMap { selection[$0] ?? visible[$0] }
+        let added = nodes.first { selection[$0.id] == nil }
+        selection = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        if let added {
+            focus = added
+            if !isShownInSunburst(added) {
+                center = added.parent ?? added
+            }
+        } else if let focus, selection[focus.id] == nil {
+            self.focus = nodes.first
+        }
+    }
+
+    /// Puts a folder at the middle of the sunburst and opens it in the tree.
+    func zoom(into node: FileNode) {
+        guard node.isDirectory else { return }
+        center = node
+        focus = node
+        reveal(inTree: node)
+        expanded.insert(node.id)
     }
 
     /// Centers the sunburst one folder up.
     func goUp() {
         guard let parent = center?.parent else { return }
-        select(parent, expand: true)
+        zoom(into: parent)
+    }
+
+    func clearSelection() {
+        selection = [:]
+    }
+
+    private func reveal(inTree node: FileNode) {
+        for ancestor in ancestors(of: node) {
+            expanded.insert(ancestor.id)
+        }
+    }
+
+    /// True when the item is one of the sunburst's rings around its center.
+    private func isShownInSunburst(_ node: FileNode) -> Bool {
+        guard let center else { return false }
+        var depth = 0
+        var current: FileNode? = node
+        while let item = current {
+            if item === center { return depth >= 1 && depth <= Self.rings }
+            depth += 1
+            current = item.parent
+        }
+        return false
+    }
+
+    private func ancestors(of node: FileNode) -> [FileNode] {
+        var ancestors: [FileNode] = []
+        var current = node.parent
+        while let item = current {
+            ancestors.append(item)
+            current = item.parent
+        }
+        return ancestors
     }
 
     func isExpanded(_ node: FileNode) -> Bool {
@@ -88,8 +176,8 @@ final class ScanModel {
         }
     }
 
-    func reveal(_ node: FileNode) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: node.path)])
+    func reveal(_ nodes: [FileNode]) {
+        NSWorkspace.shared.activateFileViewerSelecting(nodes.map { URL(fileURLWithPath: $0.path) })
     }
 
     /// The tree's visible lines: the root, then the children of every open
