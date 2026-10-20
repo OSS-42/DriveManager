@@ -117,6 +117,55 @@ final class SuggestionTests: XCTestCase {
         XCTAssertEqual(suggestions.map(\.id), ["first"])
     }
 
+    func testDoubleStarMatchesAtAnyDepthButNotInHiddenFolders() {
+        let root = tree([
+            "Users/someone/DEV/app/release/a.apk": 5_000,
+            "Users/someone/DEV/other/android/build/outputs/b.apk": 5_000,
+            "Users/someone/.gradle/c.apk": 5_000,
+        ])
+
+        let suggestions = SuggestionEngine.suggestions(in: root, rules: [rule("apks", paths: ["~/**/*.apk"])], home: home)
+
+        XCTAssertEqual(Set(suggestions.first?.items.map(\.name) ?? []), ["a.apk", "b.apk"])
+    }
+
+    func testExceptPathsAreSkipped() {
+        let root = tree([
+            "Users/someone/DEV/app/a.apk": 5_000,
+            "Users/someone/Library/Android/sdk/b.apk": 5_000,
+        ])
+        var apks = rule("apks", paths: ["~/**/*.apk"])
+        apks.exceptPaths = ["~/Library"]
+
+        let suggestions = SuggestionEngine.suggestions(in: root, rules: [apks], home: home)
+
+        XCTAssertEqual(suggestions.first?.items.map(\.name), ["a.apk"])
+    }
+
+    func testKeepNewestLeavesTheLatestBuildOfEachKind() {
+        let root = tree([
+            "Users/someone/DEV/app/release/app_1.apk": 5_000,
+            "Users/someone/DEV/app/release/app_2.apk": 5_000,
+            "Users/someone/DEV/app/release/app_3.apk": 5_000,
+            "Users/someone/DEV/app/release/app_1.aab": 5_000,
+            "Users/someone/DEV/other/app.apk": 5_000,
+        ])
+        let now = Date()
+        let release = home + "/DEV/app/release/"
+        let dates = [
+            release + "app_1.apk": now.addingTimeInterval(-3_000),
+            release + "app_2.apk": now.addingTimeInterval(-2_000),
+            release + "app_3.apk": now.addingTimeInterval(-1_000),
+            release + "app_1.aab": now.addingTimeInterval(-3_000),
+        ]
+        var builds = rule("builds", .review, paths: ["~/**/*.apk", "~/**/*.aab"])
+        builds.keepNewest = true
+
+        let suggestions = SuggestionEngine.suggestions(in: root, rules: [builds], home: home, now: now, modificationDate: { dates[$0] })
+
+        XCTAssertEqual(Set(suggestions.first?.items.map(\.name) ?? []), ["app_1.apk", "app_2.apk"])
+    }
+
     func testHealthScoreRewardsFreeSpaceAndPenalisesJunk() {
         let capacity: Int64 = 1_000_000
         let clean = HealthScore(HealthInput(capacity: capacity, available: 300_000, suggestions: [], housekeeping: 0, weeklyGrowth: nil))
