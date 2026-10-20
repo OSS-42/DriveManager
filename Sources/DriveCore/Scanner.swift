@@ -31,32 +31,44 @@ public struct ScanResult: Sendable {
     public let root: FileNode
     /// Wall-clock time the scan took, in seconds.
     public let duration: TimeInterval
-    /// Folders that could not be read, usually for lack of Full Disk Access.
+    /// Folders that could not be read, usually for lack of Full Disk Access
+    /// or, for system folders, of administrator rights.
     public let unreadablePaths: [String]
+    /// The disk the scan ran on, when macOS reports it.
+    public let volume: VolumeInfo?
 
     public var totalSize: Int64 { root.size }
     public var fileCount: Int { root.fileCount }
+
+    /// True when the scan started at the volume's mount point, such as "/".
+    public var scannedWholeVolume: Bool {
+        guard let volume else { return false }
+        return Scanner.trimmingTrailingSlash(volume.mountPath) == root.name
+    }
+
+    /// Used space the scan did not find in any file: snapshots, other system
+    /// volumes and unreadable folders. Only known for a whole-volume scan.
+    public var hiddenSize: Int64? {
+        guard scannedWholeVolume, let volume else { return nil }
+        return max(0, volume.used - totalSize)
+    }
 }
 
 /// Walks a folder and builds a tree of sizes.
 ///
 /// Sizes are the space allocated on disk, as Finder's "on disk" figure.
 /// Symbolic links are not followed, and a file with several hard links is
-/// counted once. The top-level folders are scanned in parallel.
+/// counted once. Folders near the root are scanned in parallel.
 public final class Scanner: @unchecked Sendable {
     private struct HardLinkID: Hashable {
-        let device: UInt64
-        let inode: UInt64
+        let device: Int32
+        let fileID: UInt64
     }
 
-    private static let keys: [URLResourceKey] = [
-        .isDirectoryKey,
-        .isSymbolicLinkKey,
-        .totalFileAllocatedSizeKey,
-        .fileAllocatedSizeKey,
-        .linkCountKey,
-    ]
-    private static let keySet = Set(keys)
+    /// Folders less than this many levels below the root are split across
+    /// tasks; deeper ones are read in the task that found them. Six levels
+    /// reaches inside ~/Library/Application Support when scanning "/".
+    private static let parallelDepth = 6
 
     private let options: ScanOptions
     private let lock = NSLock()
@@ -78,99 +90,95 @@ public final class Scanner: @unchecked Sendable {
 
         let rootURL = url.standardizedFileURL
         let rootPath = Self.trimmingTrailingSlash(rootURL.path)
+        var isDirectory: ObjCBool = false
         let root: FileNode
-        if let single = entry(for: rootURL, path: rootPath, name: rootPath), !single.isDirectory {
-            root = single
+        if FileManager.default.fileExists(atPath: rootPath, isDirectory: &isDirectory), !isDirectory.boolValue {
+            let size = (try? rootURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? 0
+            root = FileNode(name: rootPath, isDirectory: false, size: Int64(size), fileCount: 1)
         } else {
             root = FileNode(name: rootPath, isDirectory: true)
-            var folders: [(URL, String, FileNode)] = []
-            for childURL in listDirectory(rootURL) {
-                let name = childURL.lastPathComponent
-                let childPath = Self.join(rootPath, name)
-                guard let child = entry(for: childURL, path: childPath, name: name) else { continue }
-                if child.isDirectory {
-                    folders.append((childURL, childPath, child))
-                } else {
-                    root.add(child)
-                }
-            }
-            await withTaskGroup(of: FileNode.self) { group in
-                for (folderURL, folderPath, folder) in folders {
-                    group.addTask { [self] in
-                        walk(folderURL, path: folderPath, into: folder)
-                        return folder
-                    }
-                }
-                for await folder in group {
-                    root.add(folder)
-                }
-            }
+            await scanFolder(rootPath, into: root, depth: 0)
             root.sortBySize()
         }
 
         let unreadablePaths = lock.withLock { unreadable.sorted() }
-        return ScanResult(root: root, duration: Date().timeIntervalSince(start), unreadablePaths: unreadablePaths)
+        return ScanResult(
+            root: root,
+            duration: Date().timeIntervalSince(start),
+            unreadablePaths: unreadablePaths,
+            volume: VolumeInfo(for: rootURL)
+        )
     }
 
-    private func walk(_ url: URL, path: String, into folder: FileNode) {
-        for childURL in listDirectory(url) {
-            let name = childURL.lastPathComponent
-            let childPath = Self.join(path, name)
-            guard let child = entry(for: childURL, path: childPath, name: name) else { continue }
-            if child.isDirectory {
-                walk(childURL, path: childPath, into: child)
+    private func scanFolder(_ path: String, into folder: FileNode, depth: Int) async {
+        let subfolders = readFolder(path, into: folder)
+        if subfolders.count > 1 && depth < Self.parallelDepth {
+            await withTaskGroup(of: FileNode.self) { group in
+                for (childPath, child) in subfolders {
+                    group.addTask { [self] in
+                        await scanFolder(childPath, into: child, depth: depth + 1)
+                        return child
+                    }
+                }
+                for await child in group {
+                    folder.add(child)
+                }
             }
+        } else {
+            for (childPath, child) in subfolders {
+                if depth < Self.parallelDepth {
+                    await scanFolder(childPath, into: child, depth: depth + 1)
+                } else {
+                    walk(childPath, into: child)
+                }
+                folder.add(child)
+            }
+        }
+    }
+
+    private func walk(_ path: String, into folder: FileNode) {
+        for (childPath, child) in readFolder(path, into: folder) {
+            walk(childPath, into: child)
             folder.add(child)
         }
     }
 
-    /// Paths are built from the scan root and item names rather than read back
-    /// from URLs, so they compare reliably with `excludedPaths`.
+    /// Adds the folder's files to it and returns its subfolders, still empty,
+    /// for the caller to scan and add.
+    private func readFolder(_ path: String, into folder: FileNode) -> [(String, FileNode)] {
+        guard let entries = DirectoryReader.read(path) else {
+            lock.withLock { unreadable.append(path) }
+            return []
+        }
+        var subfolders: [(String, FileNode)] = []
+        for entry in entries {
+            let childPath = Self.join(path, entry.name)
+            if options.excludedPaths.contains(childPath) { continue }
+            if entry.kind == .directory {
+                subfolders.append((childPath, FileNode(name: entry.name, isDirectory: true)))
+                continue
+            }
+            var size = entry.allocatedSize
+            if entry.linkCount > 1 && !firstSighting(of: HardLinkID(device: entry.device, fileID: entry.fileID)) {
+                size = 0
+            }
+            folder.add(FileNode(name: entry.name, isDirectory: false, size: size, fileCount: 1))
+        }
+        return subfolders
+    }
+
+    /// Paths are built from the scan root and item names, so they compare
+    /// reliably with `excludedPaths`.
     private static func join(_ parent: String, _ name: String) -> String {
         parent.hasSuffix("/") ? parent + name : parent + "/" + name
     }
 
-    private static func trimmingTrailingSlash(_ path: String) -> String {
+    static func trimmingTrailingSlash(_ path: String) -> String {
         var path = path
         while path.count > 1 && path.hasSuffix("/") {
             path.removeLast()
         }
         return path
-    }
-
-    private func listDirectory(_ url: URL) -> [URL] {
-        do {
-            return try FileManager.default.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: Self.keys,
-                options: []
-            )
-        } catch {
-            lock.withLock { unreadable.append(url.path) }
-            return []
-        }
-    }
-
-    /// A node for one item, or nil when it is excluded or cannot be read.
-    /// A folder comes back empty; the caller walks it.
-    private func entry(for url: URL, path: String, name: String) -> FileNode? {
-        if options.excludedPaths.contains(path) { return nil }
-        guard let values = try? url.resourceValues(forKeys: Self.keySet) else { return nil }
-
-        if values.isDirectory == true && values.isSymbolicLink != true {
-            return FileNode(name: name, isDirectory: true)
-        }
-        if (values.linkCount ?? 1) > 1, let id = hardLinkID(url), !firstSighting(of: id) {
-            return FileNode(name: name, isDirectory: false, size: 0, fileCount: 1)
-        }
-        let size = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0
-        return FileNode(name: name, isDirectory: false, size: Int64(size), fileCount: 1)
-    }
-
-    private func hardLinkID(_ url: URL) -> HardLinkID? {
-        var info = stat()
-        guard lstat(url.path, &info) == 0 else { return nil }
-        return HardLinkID(device: UInt64(bitPattern: Int64(info.st_dev)), inode: UInt64(info.st_ino))
     }
 
     private func firstSighting(of id: HardLinkID) -> Bool {

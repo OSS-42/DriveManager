@@ -17,6 +17,15 @@ enum Report {
         var lines: [String] = []
         lines.append("Scanned \(result.root.name) in \(String(format: "%.1f", result.duration)) s")
         lines.append("\(bytes(result.totalSize)) in \(number(result.fileCount)) files")
+        if let volume = result.volume {
+            lines.append(
+                "Disk \(volume.name): \(bytes(volume.totalCapacity)) total, \(bytes(volume.used)) used, "
+                    + "\(bytes(volume.available)) free, \(bytes(volume.purgeable)) purgeable"
+            )
+        }
+        if let hidden = result.hiddenSize {
+            lines.append("\(bytes(hidden)) used but not found in any file (snapshots, system volumes, unreadable folders)")
+        }
         lines.append("")
         lines.append(pad("Size", 10) + "  " + pad("Share", 6) + "  " + pad("Files", 10) + "  Name")
         addRows(for: result.root, level: 0, depth: depth, top: top, total: result.totalSize, into: &lines)
@@ -25,6 +34,9 @@ enum Report {
             lines.append("")
             lines.append("\(number(result.unreadablePaths.count)) folders could not be read, so the totals are low.")
             lines.append("Give your terminal Full Disk Access in System Settings > Privacy & Security, then scan again.")
+            if getuid() != 0 {
+                lines.append("System folders also need administrator rights: sudo .build/release/drive-scan")
+            }
             for unreadable in result.unreadablePaths.prefix(5) {
                 lines.append("  \(unreadable)")
             }
@@ -82,11 +94,21 @@ enum Report {
     static func json(_ result: ScanResult, depth: Int, top: Int) -> String {
         struct Output: Encodable {
             let seconds: Double
+            let volumeTotal: Int64?
+            let volumeUsed: Int64?
+            let volumeAvailable: Int64?
+            let volumePurgeable: Int64?
+            let hiddenSize: Int64?
             let unreadablePaths: [String]
             let root: JSONNode
         }
         let output = Output(
             seconds: result.duration,
+            volumeTotal: result.volume?.totalCapacity,
+            volumeUsed: result.volume?.used,
+            volumeAvailable: result.volume?.available,
+            volumePurgeable: result.volume?.purgeable,
+            hiddenSize: result.hiddenSize,
             unreadablePaths: result.unreadablePaths,
             root: jsonNode(result.root, level: 0, depth: depth, top: top)
         )

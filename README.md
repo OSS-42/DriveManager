@@ -12,8 +12,9 @@ What it will do:
 Status: milestone 1, the scanner, is in progress. Try it:
 
 ```sh
-swift run -c release drive-scan ~             # your home folder
-swift run -c release drive-scan / --depth 3   # the whole disk, three levels deep
+swift run -c release drive-scan                # the whole disk (Macintosh HD)
+swift run -c release drive-scan ~              # your home folder
+swift build -c release && sudo .build/release/drive-scan   # include system folders
 ```
 
 Give Terminal Full Disk Access first (System Settings > Privacy & Security > Full Disk Access), otherwise some folders read as empty. See `DriveManager.md` for the plan and decisions.

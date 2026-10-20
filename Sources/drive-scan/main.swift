@@ -4,7 +4,8 @@ import Foundation
 let usage = """
 Usage: drive-scan [path] [--depth N] [--top N] [--json]
 
-Scans a folder (your home folder by default) and lists what takes the most space.
+Scans a folder (the whole startup disk by default) and lists what takes the most space.
+Run it with sudo to include system folders that only an administrator can read.
 
   --depth N   how many folder levels to show (default 2)
   --top N     how many items to show per folder (default 10)
@@ -16,7 +17,7 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-var path = NSHomeDirectory()
+var path = "/"
 var depth = 2
 var top = 10
 var json = false
