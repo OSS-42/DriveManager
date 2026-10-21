@@ -167,10 +167,15 @@ private struct SuggestionRow: View {
                 Text(Format.bytes(suggestion.size))
                     .monospacedDigit()
                     .frame(width: 80, alignment: .trailing)
-                Button(allSelected ? "Deselect" : "Select") {
+                Button {
                     model.toggleSelection(of: suggestion)
+                } label: {
+                    Label(allSelected ? "Selected" : "Select", systemImage: allSelected ? "checkmark.circle.fill" : "plus.circle")
+                        .frame(width: 84)
                 }
-                .frame(width: 80)
+                .tint(allSelected ? Color.accentColor : nil)
+                .buttonStyle(.bordered)
+                .help(allSelected ? "Take these items out of the Selected list" : "Add these items to the Selected list on the right, then move them to the Trash from there")
             }
             .padding(.vertical, 8)
         }

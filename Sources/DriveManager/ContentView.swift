@@ -29,20 +29,25 @@ struct ContentView: View {
                         TrashBanner(model: model, batch: batch)
                         Divider()
                     }
-                    HSplitView {
+                    // The tray sits outside the split view: a pane added to
+                    // an HSplitView after it appears can get no width.
+                    HStack(spacing: 0) {
                         switch screen {
                         case .overview:
                             OverviewView(model: model)
                                 .frame(minWidth: 560)
                         case .explore:
-                            TreeView(model: model)
-                                .frame(minWidth: 340, idealWidth: 460)
-                            SunburstView(model: model)
-                                .frame(minWidth: 360)
+                            HSplitView {
+                                TreeView(model: model)
+                                    .frame(minWidth: 340, idealWidth: 460)
+                                SunburstView(model: model)
+                                    .frame(minWidth: 360)
+                            }
                         }
                         if !model.selection.isEmpty {
+                            Divider()
                             SelectedTray(model: model)
-                                .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
+                                .frame(width: 320)
                         }
                     }
                     Divider()
@@ -63,6 +68,14 @@ struct ContentView: View {
                 .disabled(model.result == nil)
             }
             ToolbarItemGroup {
+                Button {
+                    model.rescan()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Scan the same disk or folder again")
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(model.lastScanURL == nil)
                 Button(action: scanDisk) {
                     Label("Scan Disk", systemImage: "internaldrive")
                 }
