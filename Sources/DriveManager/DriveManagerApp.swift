@@ -9,6 +9,21 @@ struct DriveManagerApp: App {
         WindowGroup("DriveManager") {
             ContentView()
         }
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About DriveManager") {
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .credits: NSAttributedString(
+                            string: "See what takes space on your disk and clear it safely.",
+                            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
+                        ),
+                    ])
+                }
+            }
+        }
+        Settings {
+            SettingsView()
+        }
     }
 }
 
