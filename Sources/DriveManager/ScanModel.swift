@@ -70,8 +70,7 @@ final class ScanModel {
     private static let supportFolder = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("DriveManager")
-    private let rules = SuggestionEngine.rules(withOverridesAt: ScanModel.supportFolder.appendingPathComponent("rules.json"))
-    private let weights = HealthWeights.load(from: ScanModel.supportFolder.appendingPathComponent("settings.json"))
+    private var weights: HealthWeights { AppSettings.shared.weights }
 
     /// How many rings the sunburst draws around its center.
     static let rings = 4
@@ -278,7 +277,7 @@ final class ScanModel {
     func checkSystemFiles() {
         guard let result, !isCheckingSystem else { return }
         isCheckingSystem = true
-        systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: SuggestionEngine.systemRules)
+        systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: AppSettings.shared.activeSystemRules)
         Task {
             let (runtimes, snapshots) = await Task.detached(priority: .userInitiated) {
                 (SystemChecks.simulatorRuntimes(), SystemChecks.localSnapshots())
@@ -289,6 +288,11 @@ final class ScanModel {
         }
     }
 
+    /// Redoes the suggestions and the score after a change in Settings.
+    func settingsChanged() {
+        refreshInsights()
+    }
+
     /// Whether the last scan covered the startup disk, where macOS files are.
     var scannedStartupDisk: Bool {
         result?.root.name == "/"
@@ -297,9 +301,9 @@ final class ScanModel {
     /// Runs the cleanup rules over the tree and scores the disk.
     private func refreshInsights() {
         guard let result else { return }
-        suggestions = SuggestionEngine.suggestions(in: result.root, rules: rules)
+        suggestions = SuggestionEngine.suggestions(in: result.root, rules: AppSettings.shared.activeRules)
         if systemSuggestions != nil {
-            systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: SuggestionEngine.systemRules)
+            systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: AppSettings.shared.activeSystemRules)
         }
         guard let volume = result.volume else {
             health = nil

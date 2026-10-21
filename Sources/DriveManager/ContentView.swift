@@ -91,6 +91,9 @@ struct ContentView: View {
             }
         }
         .disabled(model.isScanning)
+        .onChange(of: AppSettings.shared.revision) {
+            model.settingsChanged()
+        }
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result {
                 model.scan(url)
