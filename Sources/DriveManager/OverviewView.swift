@@ -113,6 +113,7 @@ private struct HealthHeader: View {
                             .foregroundStyle(.secondary)
                     }
                     .font(.callout)
+                    .help(part.help)
                 }
             }
         }

@@ -59,6 +59,8 @@ public struct HealthScore: Sendable {
         public let name: String
         public let points: Double
         public let maxPoints: Double
+        /// What the part measures, in plain words.
+        public var help: String = ""
         public var id: String { name }
         /// How full this part is, from 0 to 1.
         public var ratio: Double { maxPoints > 0 ? points / maxPoints : 1 }
@@ -103,10 +105,14 @@ public struct HealthScore: Sendable {
         }
 
         parts = [
-            Part(name: "Free space", points: freePoints, maxPoints: weights.freeSpace),
-            Part(name: "Junk", points: junkPoints, maxPoints: weights.suggestions),
-            Part(name: "Growth", points: trendPoints, maxPoints: weights.trend),
-            Part(name: "Trash and Downloads", points: housekeepingPoints, maxPoints: weights.housekeeping),
+            Part(name: "Free space", points: freePoints, maxPoints: weights.freeSpace,
+                 help: "How much of the disk is free. Full points at 20% free or more."),
+            Part(name: "Junk", points: junkPoints, maxPoints: weights.suggestions,
+                 help: "How much the suggestions below could free. Safe items count most."),
+            Part(name: "Filling speed", points: trendPoints, maxPoints: weights.trend,
+                 help: "How fast used space goes up, compared with your scans of the last 30 days. Full points when the disk is not filling up, none at 2% of the disk per week." + (input.weeklyGrowth == nil ? " Not measured yet: it needs a scan of Macintosh HD from at least a day ago." : "")),
+            Part(name: "Trash and Downloads", points: housekeepingPoints, maxPoints: weights.housekeeping,
+                 help: "How much sits in the Trash and Downloads. None left at 5% of the disk."),
         ]
         note = Self.note(for: parts, input: input)
     }
@@ -134,8 +140,8 @@ public struct HealthScore: Sendable {
         case "Junk":
             let size = input.suggestions.reduce(Int64(0)) { $0 + $1.size }
             return "\(bytes(size)) of junk could go. Start with the Safe suggestions."
-        case "Growth":
-            return "Used space grew \(bytes(input.weeklyGrowth ?? 0)) in a week."
+        case "Filling speed":
+            return "Your disk is filling up fast: \(bytes(input.weeklyGrowth ?? 0)) more used in a week."
         default:
             return "The Trash and Downloads hold \(bytes(input.housekeeping)). Empty the Trash and sort Downloads."
         }
