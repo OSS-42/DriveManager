@@ -35,6 +35,7 @@ Planned layout: a Swift package with a `DriveCore` library (scanner, index, rule
 - `swift run -c release drive-scan` scans the whole startup disk and `drive-scan ~` your home folder; `sudo .build/release/drive-scan` also reads system folders; `drive-scan --help` lists the options. Give your terminal Full Disk Access first, or some folders read as empty.
 - `swift test` runs the tests.
 - Cleanup rules are built in (`Sources/DriveCore/DefaultRules.swift`). `~/Library/Application Support/DriveManager/rules.json` can add rules or replace one by id (paths take `*`, `?` and `**` for any depth; `exceptPaths` skips folders; `keepNewest` keeps the latest file of each type per folder; `explain` holds the what/why/how text of the "?" button); `settings.json` there can set `healthWeights` (`freeSpace`, `suggestions`, `trend`, `housekeeping`).
+- macOS files (installers, /Library/Updates, system caches and logs) use separate rules in `Sources/DriveCore/SystemRules.swift`, run only from the "Check macOS files" button, and never count toward the health score or "Clean all Safe items". Time Machine snapshots and simulator runtimes are listed with a Terminal command to copy, not moved to the Trash.
 - "Automatic" cleaning means the one-click "Clean all Safe items" button, never a scheduled clean (Eric's call).
 
 - Code is written in a cloud Linux container, which has no Swift toolchain. CI (`.github/workflows/ci.yml`) builds and tests on a macOS runner; treat a green CI run as the build check.

@@ -57,6 +57,11 @@ final class ScanModel {
 
     /// Junk found by the cleanup rules, largest first.
     private(set) var suggestions: [Suggestion] = []
+    /// macOS files found by "Check macOS files", nil until it has run.
+    private(set) var systemSuggestions: [Suggestion]?
+    private(set) var simulatorRuntimes: [SimulatorRuntime] = []
+    private(set) var localSnapshots: [String] = []
+    private(set) var isCheckingSystem = false
     private(set) var health: HealthScore?
     private var healthInput: HealthInput?
     /// Used-space growth per week, measured when the scan finished.
@@ -111,6 +116,9 @@ final class ScanModel {
         expanded = []
         lastTrash = nil
         suggestions = []
+        systemSuggestions = nil
+        simulatorRuntimes = []
+        localSnapshots = []
         health = nil
         healthInput = nil
         Task {
@@ -264,10 +272,35 @@ final class ScanModel {
         refreshInsights()
     }
 
+    /// Looks for macOS files worth removing: the system rules over the
+    /// scanned tree, plus Time Machine snapshots and simulator runtimes,
+    /// which the scan cannot see.
+    func checkSystemFiles() {
+        guard let result, !isCheckingSystem else { return }
+        isCheckingSystem = true
+        systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: SuggestionEngine.systemRules)
+        Task {
+            let (runtimes, snapshots) = await Task.detached(priority: .userInitiated) {
+                (SystemChecks.simulatorRuntimes(), SystemChecks.localSnapshots())
+            }.value
+            simulatorRuntimes = runtimes
+            localSnapshots = snapshots
+            isCheckingSystem = false
+        }
+    }
+
+    /// Whether the last scan covered the startup disk, where macOS files are.
+    var scannedStartupDisk: Bool {
+        result?.root.name == "/"
+    }
+
     /// Runs the cleanup rules over the tree and scores the disk.
     private func refreshInsights() {
         guard let result else { return }
         suggestions = SuggestionEngine.suggestions(in: result.root, rules: rules)
+        if systemSuggestions != nil {
+            systemSuggestions = SuggestionEngine.suggestions(in: result.root, rules: SuggestionEngine.systemRules)
+        }
         guard let volume = result.volume else {
             health = nil
             healthInput = nil
