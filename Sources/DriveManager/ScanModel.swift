@@ -92,7 +92,17 @@ final class ScanModel {
         selection[node.id] != nil
     }
 
+    /// The disk or folder scanned last, for Refresh.
+    private(set) var lastScanURL: URL?
+
+    /// Scans the last disk or folder again, to see the effect of changes
+    /// made outside DriveManager, such as emptying the Trash.
+    func rescan() {
+        if let lastScanURL { scan(lastScanURL) }
+    }
+
     func scan(_ url: URL) {
+        lastScanURL = url
         phase = .scanning(url)
         result = nil
         selection = [:]
