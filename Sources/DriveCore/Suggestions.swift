@@ -41,6 +41,12 @@ public struct CleanupRule: Codable, Sendable, Equatable {
         public let why: String
         /// How to remove them, and whether they come back.
         public let how: String
+
+        public init(what: String, why: String, how: String) {
+            self.what = what
+            self.why = why
+            self.how = how
+        }
     }
 }
 
@@ -70,6 +76,16 @@ public enum SuggestionEngine {
             return try JSONDecoder().decode([CleanupRule].self, from: Data(defaultRulesJSON.utf8))
         } catch {
             assertionFailure("Built-in rules do not decode: \(error)")
+            return []
+        }
+    }()
+
+    /// Rules for files that belong to macOS, checked only on request.
+    public static let systemRules: [CleanupRule] = {
+        do {
+            return try JSONDecoder().decode([CleanupRule].self, from: Data(systemRulesJSON.utf8))
+        } catch {
+            assertionFailure("System rules do not decode: \(error)")
             return []
         }
     }()

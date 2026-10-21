@@ -63,6 +63,8 @@ public final class Cleaner: @unchecked Sendable {
                 try files.trashItem(at: url, resultingItemURL: &trashed)
                 let trashedPath = (trashed as URL?)?.path ?? ""
                 moved.append(TrashRecord(originalPath: item.path, trashedPath: trashedPath, size: item.size, date: Date()))
+            } catch let error as CocoaError where error.code == .fileWriteNoPermission {
+                skipped.append(SkippedItem(path: item.path, reason: "Owned by macOS: drag it to the Trash in Finder, which asks for your password"))
             } catch {
                 skipped.append(SkippedItem(path: item.path, reason: error.localizedDescription))
             }
